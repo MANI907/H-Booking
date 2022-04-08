@@ -239,7 +239,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         CorrelationHttpHeaderHelper.prepareCorrelationParams(request);
-+       CorrelationLoggerUtil.updateCorrelation();
+        CorrelationLoggerUtil.updateCorrelation();
         filterChain.doFilter(request, response);
         CorrelationLoggerUtil.clear();
     }
@@ -254,7 +254,7 @@ public class CorrelationHttpHeaderHelper {
 
     public static void prepareCorrelationParams(HttpServletRequest httpServletRequest) {
         String currentCorrelationId = prepareCorrelationId(httpServletRequest);
-+       setCorrelations(httpServletRequest, currentCorrelationId);
+       setCorrelations(httpServletRequest, currentCorrelationId);
         log.debug("Request Correlation Parameters : ");
         CorrelationHeaderField[] headerFields = CorrelationHeaderField.values();
         for (CorrelationHeaderField field : headerFields) {
@@ -264,7 +264,7 @@ public class CorrelationHttpHeaderHelper {
     }
 
     private static String prepareCorrelationId(HttpServletRequest httpServletRequest) {
-+        String currentCorrelationId = httpServletRequest.getHeader(CorrelationHeaderField.CORRELATION_ID.getValue());
+        String currentCorrelationId = httpServletRequest.getHeader(CorrelationHeaderField.CORRELATION_ID.getValue());
         if (currentCorrelationId == null) {
             currentCorrelationId = CorrelationContext.generateId();
             log.trace("Generated Correlation Id: {}", currentCorrelationId);
@@ -287,7 +287,7 @@ package com.example.kafkapub.publish;
 import ...
 
 @Component
-+ public class GreetingProducer {
+ public class GreetingProducer {
     @Autowired
     private KafkaTemplate<String, Greeting> greetingKafkaTemplate;
 
@@ -320,10 +320,10 @@ package com.example.kafkasub.consume;
 import ...
 
 @Component
-+ public class GreetingConsumer {
+  public class GreetingConsumer {
 
     @KafkaListener(topics = "${greeting.topic.name}", containerFactory = "greetingKafkaListenerContainerFactory")
-+    public void greetingListener(Greeting greeting, Acknowledgment ack) {
+     public void greetingListener(Greeting greeting, Acknowledgment ack) {
         try {
             System.out.println("----Received Message----");
             System.out.println("id: " + greeting.getName());
@@ -339,6 +339,121 @@ import ...
 ```
    
 
+# Req / Resp (feign client)
+
+* `Interface 선언`을 통해 자동으로 Http Client 생성
+* 선언적 Http Client란, Annotation만으로 Http Client를 만들수 있고, 이를 통해서 원격의 Http API호출이 가능
+ 
++ Dependency 추가
+```diff
+dependencies {
+    ...
+    
+    /** feign client*/
+    implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
+    implementation group: 'io.github.openfeign', name: 'feign-gson', version: '11.0'
+
+    /** spring web*/
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'junit:junit:4.13.1'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    annotationProcessor 'org.projectlombok:lombok'
+    
+    ...
+}
+```
+
++ Controller
+```diff
+package com.example.feigntest.controller;
+
+import ...
+
+@Slf4j
+@RestController
+@RequiredArgsConstructor
+public class HTaxiFeignController {
+
+    private final HTaxiFeignService HTaxiFeignService;
+
+   @GetMapping(value = "/v1/github/{owner}/{repo}")
+    public List<Contributor> getHTaxiContributors(@PathVariable String owner , @PathVariable String repo){
+        return HTaxiFeignService.getContributor(owner,repo);
+    }
+}
+
+```
+
++ Service
+```diff
+package com.example.feigntest.service;
+
+import ...
+
+@Slf4j
+@Service
+public class HTaxiFeignService {
+
+  @Autowired
+  private HTaxiFeignClient hTaxiFeignClient;
+
+  public List<Contributor> getContributor(String owner, String repo) {
+    List<Contributor> contributors = hTaxiFeignClient.getContributor(owner, repo);
+    return contributors;
+  }
+}
+
+```
+
++ FeignClient Interface
+```diff
+package com.example.feigntest.client;
+
+import ...
+
+@FeignClient(name="feign", url="https://api.github.com/repos",configuration = Config.class)
+public interface HTaxiFeignClient {
+    @RequestMapping(method = RequestMethod.GET , value = "/{owner}/{repo}/contributors")
+    List<Contributor> getContributor(@PathVariable("owner") String owner, @PathVariable("repo") String repo);
+}
+
+
+```
+
++ DTO
+```
+package com.example.feigntest.dto;
+
+import lombok.Data;
+
+@Data
+public class Contributor {
+    String login;
+    String id;
+    String type;
+    String site_admin;
+}	
+```
+	
+	
++ `@EnableFeignClients` Set
+```diff
+package com.example;
+
+import ...
+@EnableFeignClients
+@SpringBootApplication
+public class ApiTestApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ApiTestApplication.class, args);
+    }
+
+}
+
+```
+   
 ## Gateway
 + gateway App 추가 후 application.yaml 에서 각 서비스 routes 추가하고 gateway 서버 포트를 8080로 설정
 
@@ -382,3 +497,5 @@ import ...
 server:
   port: 8080  
 ```
+   
+# Deploy
