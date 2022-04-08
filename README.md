@@ -19,29 +19,23 @@
    
 ----
 # Saga
-+ Step1<p>
-*전반적인 어플리케이션의 구조 및 흐름을 인지한 상태에서 실시한 이벤트 스토밍과정으로, 기초적인 이벤트 도출이나, Aggregation 작업은 `Bounded Context`를 먼저 선정하고 진행*
-<img src = '/images/Screen Shot 2022-03-28 at 14.42.26.png'>
++ Pub/Sub연결
+<img src = 'Images/pubsub.png'>
 
-+ Step2<p>
-*Pub/Sub연결*
-<img src = '/images/Screen Shot 2022-03-28 at 15.18.42.png'>
-
-+ Step3<p>
-*완성본 대한 기능 검증*
-<img src = '/images/Screen Shot 2022-03-28 at 15.30.42.png'>
++ 완성본 대한 기능 검증
+<img src = 'Images/기능검증.jpg'>
 
 ```
   - 기능요소
-    - 호스트가 제공할 숙소를 등록/수정/삭제한다
-    - 고객이 숙소를 선택하여 예약을 요청한다
-    - 예약 요청 직후 결제가 진행된다
-    - 사용자가 결제한다
-    - 결제가 완료되면 호스트에게 예약 요청 정보가 전달된다
-    - 호스트가 예약을 확정하면 고객에게 예약내역이 전달된다
-    - 고객이 예약을 취소할 수 있다
-    - 숙박예약이 취소될 경우 취소 내역이 전달된다
-    - 숙소에 대한 정보 및 예약 상태 등을 한 화면에서 확인할 수 있다
+    - 호스트가 제공할 숙소를 등록/수정/삭제한다 (ok)
+    - 고객이 숙소를 선택하여 예약을 요청한다 (ok)
+    - 예약 요청 직후 결제가 진행된다 (ok)
+    - 사용자가 결제한다 (ok)
+    - 결제가 완료되면 호스트에게 예약 요청 정보가 전달된다 (ok)
+    - 호스트가 예약을 확정하면 고객에게 예약내역이 전달된다 (ok)
+    - 고객이 예약을 취소할 수 있다 (ok)
+    - 숙박예약이 취소될 경우 취소 내역이 전달된다 (ok)
+    - 숙소에 대한 정보 및 예약 상태 등을 한 화면에서 확인할 수 있다 (ok)
   - 비기능요소
     - 마이크로 서비스를 넘나드는 시나리오에 대한 트랜잭션 처리
     - 고객 결제가 완료 되지 않은 예약 요청은 'ACID' 트랜잭션 적용(Request/Response 방식 처리)
@@ -51,4 +45,74 @@
   
   ```
   
++ 구현<p>
+   서비스를 Local에서 아래와 같은 방법으로 서비스별로 개별적으로 실행한다.
+   
+```
+    cd room
+    mvn spring-boot:run
+```
+```
+    cd reservation
+    mvn spring-boot:run 
+```
+```
+    cd payment
+    mvn spring-boot:run  
+```
+```
+    cd message
+    python policy-handler.py 
+```
+
++ DDD적용<p>
+    4개의 도메인으로 관리되고 있으며 `숙소(Room)`, `결제(Payment)`, `예약(Reservation)`, `메시지(Message)`으로 구성된다.
+ 
+```
+   
+   @Table(name="Reservation_table")
+public class Reservation  {
+
+    @Id
+    @GeneratedValue(strategy=GenerationType.AUTO)
+    private Long roomId;
+
+    private Long reservationId;
+
+    private Integer status;
+
+    private Long paymentId;
+
+
+    @PostPersist
+    public void onPostPersist(){
+        //숙소 예약 요청
+    	ReservationMade reservationMade = new ReservationMade();
+        BeanUtils.copyProperties(this, reservationMade);
+        reservationMade.publishAfterCommit();
+        
+        hbooking.external.Room room = new hbooking.external.Room();
+        room.setRoomId(getid());
+        
+        ReservationApplication.applicationContext.getBean(hbooking.external.RoomService.class)
+            .requestReservationStatus(room);
+
+        ReservationCancelled reservationCancelled = new ReservationCancelled();
+        BeanUtils.copyProperties(this, reservationCancelled);
+        reservationCancelled.publishAfterCommit();
+
+        ReservationConfirmed reservationConfirmed = new ReservationConfirmed();
+        BeanUtils.copyProperties(this, reservationConfirmed);
+        reservationConfirmed.publishAfterCommit();
+
+        ReservationCancelled reservationCancelled = new ReservationCancelled();
+        BeanUtils.copyProperties(this, reservationCancelled);
+        reservationCancelled.publishAfterCommit();
+
+    }
+```
+   
 # CQRS(Command and Query Responsitibility and Segregation)
+
+숙소 예약 가능 여부/결제 등 현 Status에 대해 고객이 조회할 수 있도록 CQRS 구현
+   
