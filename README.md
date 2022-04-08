@@ -499,3 +499,57 @@ server:
 ```
    
 # Deploy
+Kubernetes용 Deployment.yaml 작성 후 Deploy 생성
+	
+```
+	apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: h-booking
+  labels:
+    app: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: 2979050235289.dkr.ecr.ap-northeast-2.amazonaws.com/gateway:1.0
+          ports:
+            - containerPort: 8080
+```
++ Deploy 생성
+```
+	kubectl apply -f deployment.yaml
+```
+
++ Service.yaml 작성 후 로드밸런서 생성 후 Gateway 엔드포인트 확인
+```
+	apiVersion: v1
+  kind: Service
+  metadata:
+    name: gateway
+    namespace: h-booking
+    labels:
+      app: gateway
+  spec:
+    ports:
+      - port: 8080
+        targetPort: 8080
+    selector:
+      app: gateway
+    type:
+      LoadBalancer
+```
+	
++ Service 생성
+```
+	kubectl apply -f service.yaml
+```
