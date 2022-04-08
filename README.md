@@ -71,48 +71,314 @@
 ```
    
    @Table(name="Reservation_table")
-public class Reservation  {
+   public class Reservation  {
 
-    @Id
-    @GeneratedValue(strategy=GenerationType.AUTO)
-    private Long roomId;
+       @Id
+       @GeneratedValue(strategy=GenerationType.AUTO)
+       private Long roomId;
 
-    private Long reservationId;
+       private Long reservationId;
 
-    private Integer status;
+       private Integer status;
 
-    private Long paymentId;
+       private Long paymentId;
 
 
-    @PostPersist
-    public void onPostPersist(){
-        //숙소 예약 요청
-    	ReservationMade reservationMade = new ReservationMade();
-        BeanUtils.copyProperties(this, reservationMade);
-        reservationMade.publishAfterCommit();
-        
-        hbooking.external.Room room = new hbooking.external.Room();
-        room.setRoomId(getid());
-        
-        ReservationApplication.applicationContext.getBean(hbooking.external.RoomService.class)
-            .requestReservationStatus(room);
+       @PostPersist
+       public void onPostPersist(){
+           //숙소 예약 요청
+         ReservationMade reservationMade = new ReservationMade();
+           BeanUtils.copyProperties(this, reservationMade);
+           reservationMade.publishAfterCommit();
 
-        ReservationCancelled reservationCancelled = new ReservationCancelled();
-        BeanUtils.copyProperties(this, reservationCancelled);
-        reservationCancelled.publishAfterCommit();
+           hbooking.external.Room room = new hbooking.external.Room();
+           room.setRoomId(getid());
 
-        ReservationConfirmed reservationConfirmed = new ReservationConfirmed();
-        BeanUtils.copyProperties(this, reservationConfirmed);
-        reservationConfirmed.publishAfterCommit();
+           ReservationApplication.applicationContext.getBean(hbooking.external.RoomService.class)
+               .requestReservationStatus(room);
 
-        ReservationCancelled reservationCancelled = new ReservationCancelled();
-        BeanUtils.copyProperties(this, reservationCancelled);
-        reservationCancelled.publishAfterCommit();
+           ReservationCancelled reservationCancelled = new ReservationCancelled();
+           BeanUtils.copyProperties(this, reservationCancelled);
+           reservationCancelled.publishAfterCommit();
+
+           ReservationConfirmed reservationConfirmed = new ReservationConfirmed();
+           BeanUtils.copyProperties(this, reservationConfirmed);
+           reservationConfirmed.publishAfterCommit();
+
+           ReservationCancelled reservationCancelled = new ReservationCancelled();
+           BeanUtils.copyProperties(this, reservationCancelled);
+           reservationCancelled.publishAfterCommit();
 
     }
+```
+
++ 서비스 호출흐름(Sync)<p>
+   `숙소요청(Reservation)` -> `결제(Payment)`간 호출은 동기식으로 일관성을 유지하는 트랜잭션으로 처리
+   * 고객이 숙소 예약 요청
+   * 결제서비스를 호출하기 위해 FeignClient 이용하여 Proxy 구현
+   * 예약 요청을 받은 직후 `(@PostPersist`) 결제를 요청하도록 처리
+
+```
+      package hbooking.external;
+
+      import org.springframework.cloud.openfeign.FeignClient;
+      import org.springframework.web.bind.annotation.RequestBody;
+      import org.springframework.web.bind.annotation.PathVariable;
+      import org.springframework.web.bind.annotation.RequestMapping;
+      import org.springframework.web.bind.annotation.RequestMethod;
+
+      import java.util.Date;
+
+      @FeignClient(name="Payment", url="http://Payment:8080")
+      public interface PaymentService {
+          @RequestMapping(method= RequestMethod.GET, path="/payments")
+          public void pay(@RequestBody Payment payment);
+
+      }
+
 ```
    
 # CQRS(Command and Query Responsitibility and Segregation)
 
-숙소 예약 가능 여부/결제 등 현 Status에 대해 고객이 조회할 수 있도록 CQRS 구현
+숙소 예약 가능 여부/결제 등 현 Status에 대해 고객이 조회할 수 있도록 CQRS로 구현
++ room, reservation, payment 개별 Aggregate Status 데이터 통합 조회하여 성능 이슈 사전 예방
++ 뷰를 위한 테이블 모델링(RoomView)<p>
+<img src = 'Images/roomView.jpg'>
+
++ reservation 서비스(8081)와 room 서비스(8082)를 각각 실행 
    
+   
+```
+    cd room
+    mvn spring-boot:run
+```
+```
+    cd reservation
+    mvn spring-boot:run 
+```
+
++ room에 대한 reservation요청
+   
+ ```sql
+ http localhost:8081/reservations roomId=203 
+ ```
+   
+ ```sql
+HTTP/1.1 201
+Content-Type: application/json;charset=UTF-8
+Date: Fri, 08 Apr 2022 11:48:23 GMT
+Location: http://localhost:8081/reservations/1
+Transfer-Encoding: chunked
+
+{
+    "_links": {
+        "reservation": {
+            "href": "http://localhost:8081/reservations/1"
+        },
+        "self": {
+            "href": "http://localhost:8081/reservations/1"
+        }
+    },
+    "roomId": 203,
+}
+```
+   
+
++ 카프카 customer 이벤트 모니터링
+
+```
+/usr/local/kafka/bin/kafka-console-customer.sh --bootstrap-server localhost:9092 --topic booking --from-beginning
+```
+
+```sql
+{"eventType":"Reserved","timestamp":"20220408114823","id":1,"roomId":203,"me":true}
+{"eventType":"Allocated","timestamp":"20220408114823","id":1,"resrvationId":1,"taxiId":1,"me":true}
+```
+
++ roomView 서비스를 실행
++ roomView 에서 room, resrvation,pament 상태 통합 조회 가능
+
+```
+cd grabView
+mvn spring-boot:run
+```
+   
+```
+"roomViews": [
+   {
+    "_links": {
+        "roomview": {
+            "href": "http://localhost:8085/roomViews/1"
+        },
+        "self": {
+            "href": "http://localhost:8085/roomViews/1"
+        }
+    },
+    "roomdesc": "house with wonderful view",
+    "status" : 1,
+    "reservationId" : 1,
+    "paymentId" :1
+  },
+   
+```
+
+   
+ 
+# Correlation / Compensation
+## Correlation Id
+
++ Correlation Id를 생성하는 로직은 common-module로 구성하였다. 해당 로직은, 모든 컴포넌트에 동일하게 적용하고 컴포넌트 간의 통신은 Json 기반의 Http request를 받았을 때, Filter 에서 생성
++ 예약을 하면 동시에 예약한 방(Room), 결제(Payment) 서비스 상태가 변경
++ 예약 취소시에도 동일하게 예약 취소한 방(Room), 결제(Payment) 서비스 상태 변경
+   
+```diff
+@Slf4j
+public class CorrelationIdFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        CorrelationHttpHeaderHelper.prepareCorrelationParams(request);
++       CorrelationLoggerUtil.updateCorrelation();
+        filterChain.doFilter(request, response);
+        CorrelationLoggerUtil.clear();
+    }
+ }
+```
+
+   
++ Filter에서는, 요청받은 request 를 확인하여, Correlation-Id가 존재할 경우, 해당 데이터를 식별자로 사용하고, 존재하지 않을 경우에는, 신규 Correlation Id를 생성한다. 관련 로직은 다음과 같다.
+```diff
+@Slf4j
+public class CorrelationHttpHeaderHelper {
+
+    public static void prepareCorrelationParams(HttpServletRequest httpServletRequest) {
+        String currentCorrelationId = prepareCorrelationId(httpServletRequest);
++       setCorrelations(httpServletRequest, currentCorrelationId);
+        log.debug("Request Correlation Parameters : ");
+        CorrelationHeaderField[] headerFields = CorrelationHeaderField.values();
+        for (CorrelationHeaderField field : headerFields) {
+            String value = CorrelationHeaderUtil.get(field);
+            log.debug("{} : {}", field.getValue(), value);
+        }
+    }
+
+    private static String prepareCorrelationId(HttpServletRequest httpServletRequest) {
++        String currentCorrelationId = httpServletRequest.getHeader(CorrelationHeaderField.CORRELATION_ID.getValue());
+        if (currentCorrelationId == null) {
+            currentCorrelationId = CorrelationContext.generateId();
+            log.trace("Generated Correlation Id: {}", currentCorrelationId);
+        } else {
+            log.trace("Incoming Correlation Id: {}", currentCorrelationId);
+        }
+        return currentCorrelationId;
+    }
+} 
+```
+   
+   
+
+## Compensation
+
++ `Correlation Id` 정보를 기반으로 kafka를 이용한 비동기방식의 Compensation Transaction 처리
+```diff
+package com.example.kafkapub.publish;
+
+import ...
+
+@Component
++ public class GreetingProducer {
+    @Autowired
+    private KafkaTemplate<String, Greeting> greetingKafkaTemplate;
+
+    @Value(value = "${greeting.topic.name}")
+    private String greetingTopicName;
+
+    public void sendMessage(Greeting greeting) {
+        ListenableFuture<SendResult<String, Greeting>> future = greetingKafkaTemplate.send(greetingTopicName, greeting);
+
+        future.addCallback(new ListenableFutureCallback<SendResult<String, Greeting>>() {
+            @Override
+            public void onSuccess(SendResult<String, Greeting> result) {
+                Greeting g = result.getProducerRecord().value();
+                System.out.println("Sent message=[" + g.toString() + "] with offset=[" + result.getRecordMetadata().offset() + "]");
+            }
+
+            @Override
+            public void onFailure(Throwable ex) {
+                // needed to do compensation transaction.
+                System.out.println( "Unable to send message=[" + greeting.toString() + "] due to : " + ex.getMessage());
+            }
+        });
+    }
+}
+```
+
+```diff
+package com.example.kafkasub.consume;
+
+import ...
+
+@Component
++ public class GreetingConsumer {
+
+    @KafkaListener(topics = "${greeting.topic.name}", containerFactory = "greetingKafkaListenerContainerFactory")
++    public void greetingListener(Greeting greeting, Acknowledgment ack) {
+        try {
+            System.out.println("----Received Message----");
+            System.out.println("id: " + greeting.getName());
+            System.out.println("act: " + greeting.getMsg());
+
+            ack.acknowledge();
+        } catch (Exception e) {
+            // 에러 처리
+        }
+    }
+}
+
+```
+   
+
+## Gateway
++ gateway App 추가 후 application.yaml 에서 각 서비스 routes 추가하고 gateway 서버 포트를 8080로 설정
+
+```
+   spring:
+  profiles: docker
+  cloud:
+    gateway:
+      routes:
+        - id: payment
+          uri: http://payment:8080
+          predicates:
+            - Path=/payments/** 
+        - id: room
+          uri: http://room:8080
+          predicates:
+            - Path=/rooms/**, /check/**
+        - id: reservation
+          uri: http://reservation:8080
+          predicates:
+            - Path=/reservations/**
+        - id: message
+          uri: http://message:8080
+          predicates:
+            - Path=/messages/** 
+        - id: viewpage
+          uri: http://viewpage:8080
+          predicates:
+            - Path= /roomviews/**
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - "*"
+            allowedMethods:
+              - "*"
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+
+server:
+  port: 8080  
+```
